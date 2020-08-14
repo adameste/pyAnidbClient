@@ -6,6 +6,10 @@ import glob
 import errno
 import time
 
+import warnings
+warnings.filterwarnings("ignore",category=UserWarning,module="fuzzywuzzy")
+import fuzzywuzzy.process
+
 import anidbcli.libed2k as libed2k 
 
 # ed2k,md5,sha1,crc32,resolution,aired,year,romanji,kanji,english,epno,epname,epromanji,epkanji,groupname,shortgroupname
@@ -149,7 +153,7 @@ class GetFileInfoOperation(Operation):
         fileinfo["g_sname"] = parsed[41]
         fileinfo["version"] = ""
         fileinfo["censored"] = ""
-        
+
         status = int(fileinfo["file_state"])
         if status & 4: fileinfo["version"] = "v2"
         if status & 8: fileinfo["version"] = "v3"
@@ -163,7 +167,7 @@ class GetFileInfoOperation(Operation):
         if IsNullOrWhitespace(fileinfo["a_english"]):
             fileinfo["a_english"] = fileinfo["a_romaji"]
 
-        file["info"] = fileinfo
+        file["info"] = construct_helper_tags(fileinfo)
         self.output.success("Successfully grabbed file info.")
         return True
 
@@ -231,8 +235,48 @@ def filename_friendly(input):
 def parse_data(raw_data):
     res = raw_data.split("|")
     for idx, item in enumerate(res):
+        item = item.replace("'", "§") # preseve lists by converting UDP list delimiter ' to § (§ seems unused in AniDB)        
         item = item.replace("<br />", "\n")
         item = item.replace("/", "|")
         item = item.replace("`", "'")
         res[idx] = item
     return res
+
+def construct_helper_tags(fileinfo):
+    year_list = re.findall('(\d{4})', fileinfo["year"])
+    if (len(year_list) > 0):
+        fileinfo["year_start"] = year_list[0]
+        fileinfo["year_end"] = year_list[-1]
+    else:
+        fileinfo["year_start"] = fileinfo["year_end"] = fileinfo["year"]
+
+    res_match = re.findall('x(360|480|720|1080|2160)', fileinfo["resolution"])
+    if (len(res_match) > 0):
+        fileinfo["resolution_abbr"] = res_match[0] + 'p'
+    else:
+        fileinfo["resolution_abbr"] = fileinfo["resolution"]
+
+    # try to find "good" alternative series names from (a_other, a_synonyms, a_short)
+    combo_names_list = fileinfo["a_other"].split('§') + fileinfo["a_synonyms"].split('§') + fileinfo["a_short"].split('§')
+    alt_names_list = list(filter(lambda x: x.isascii(), combo_names_list))
+    a_english_alt_tuplist = fuzzywuzzy.process.extractBests(fileinfo["a_english"], alt_names_list, score_cutoff=30, limit=15)
+    a_romaji_alt_tuplist = fuzzywuzzy.process.extractBests(fileinfo["a_romaji"], alt_names_list, score_cutoff=30, limit=15)
+    # build, extract short/shorter "decent" name
+    fileinfo["a_english_short"] = next(filter(lambda x: len(x[0]) < 40 and len(x[0]) < len(fileinfo["a_english"]), a_english_alt_tuplist), (fileinfo["a_english"],100))[0]
+    fileinfo["a_romaji_short"] = next(filter(lambda x: len(x[0]) < 40 and len(x[0]) < len(fileinfo["a_romaji"]), a_romaji_alt_tuplist), (fileinfo["a_romaji"],100))[0]
+    fileinfo["a_english_shorter"] = next(filter(lambda x: len(x[0]) < 12 and len(x[0]) < len(fileinfo["a_english"]), a_english_alt_tuplist), (fileinfo["a_english"],100))[0]
+    fileinfo["a_romaji_shorter"] = next(filter(lambda x: len(x[0]) < 12 and len(x[0]) < len(fileinfo["a_romaji"]), a_romaji_alt_tuplist), (fileinfo["a_romaji"],100))[0]
+    # remove 100% matches
+    a_english_alt_tuplist = list(filter(lambda x: x[1] < 100, a_english_alt_tuplist))
+    a_romaji_alt_tuplist = list(filter(lambda x: x[1] < 100, a_romaji_alt_tuplist))
+    # get best alternative name match
+    if (len(a_english_alt_tuplist) > 0):
+        fileinfo["a_english_alt"] = a_english_alt_tuplist[0][0]
+    else:
+        fileinfo["a_english_alt"] = fileinfo["a_english"]
+
+    if (len(a_romaji_alt_tuplist) > 0):
+        fileinfo["a_romaji_alt"] = a_romaji_alt_tuplist[0][0]
+    else:
+        fileinfo["a_romaji_alt"] = fileinfo["a_romaji"]
+    return fileinfo
