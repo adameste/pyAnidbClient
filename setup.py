@@ -6,7 +6,7 @@ with open('README.rst') as f:
 
 setup(
     name='anidbcli',
-    version='1.64',
+    version='1.65',
     keywords='Anidb UDP API CLI client ed2k rename mylist',
     description='Simple CLI for managing your anime collection using AniDB UDP API.',
     long_description=long_description,
@@ -26,7 +26,8 @@ setup(
         'pycryptodome',
         'colorama',
         'pyperclip',
-        'joblib'
+        'joblib',
+        'fuzzywuzzy'
     ],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
